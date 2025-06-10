@@ -21,8 +21,8 @@
 
 1. Клонируйте репозиторий:
 ```bash
-git clone [url-репозитория]
-cd [название-директории]
+git clone https://github.com/A-Lazar-A/funds_tg_bot
+cd funds_tg_bot
 ```
 
 2. Создайте виртуальное окружение и активируйте его:
