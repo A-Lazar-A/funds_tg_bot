@@ -252,6 +252,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 def main() -> None:
     """Start the bot."""
+    # Создать лист Summary, если его нет
+    sheets_service.ensure_summary_sheet()
     # Create the Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
