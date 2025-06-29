@@ -7,6 +7,7 @@ from config import TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE
 from services.speech_service import SpeechService
 from services.sheets_service import GoogleSheetsService
 from services.category_service import CategoryService
+from services.auth_decorator import require_auth, is_user_allowed
 
 # Enable logging
 logging.basicConfig(
@@ -26,6 +27,7 @@ speech_service = SpeechService()
 sheets_service = GoogleSheetsService()
 category_service = CategoryService()
 
+@require_auth
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     welcome_message = (
@@ -42,6 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     await update.message.reply_text(welcome_message)
 
+@require_auth
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /help is issued."""
     help_message = (
@@ -58,6 +61,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
     await update.message.reply_text(help_message)
 
+@require_auth
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle voice messages."""
     try:
@@ -124,6 +128,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle category selection."""
+    # Check authorization for callback queries
+    user_id = update.effective_user.id
+    if not is_user_allowed(user_id):
+        await update.callback_query.answer("❌ У вас нет доступа к этому боту.", show_alert=True)
+        return ConversationHandler.END
+    
     query = update.callback_query
     await query.answer()
     
@@ -135,6 +145,13 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
 
 async def confirm_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ask for transaction confirmation."""
+    # Check authorization for callback queries
+    if update.callback_query:
+        user_id = update.effective_user.id
+        if not is_user_allowed(user_id):
+            await update.callback_query.answer("❌ У вас нет доступа к этому боту.", show_alert=True)
+            return ConversationHandler.END
+    
     transaction = context.user_data['transaction']
     
     keyboard = [
@@ -162,6 +179,12 @@ async def confirm_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle transaction confirmation."""
+    # Check authorization for callback queries
+    user_id = update.effective_user.id
+    if not is_user_allowed(user_id):
+        await update.callback_query.answer("❌ У вас нет доступа к этому боту.", show_alert=True)
+        return ConversationHandler.END
+    
     query = update.callback_query
     await query.answer()
     
@@ -207,6 +230,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.clear()
     return ConversationHandler.END
 
+@require_auth
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send statistics when the command /stats is issued."""
     try:
@@ -229,22 +253,26 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.exception(e)
         await update.message.reply_text("❌ Произошла ошибка при получении статистики.")
 
+@require_auth
 async def categories_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show categories when the command /categories is issued."""
     # TODO
         
     await update.message.reply_text("Категории...")
 
+@require_auth
 async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Delete last transaction when the command /delete is issued."""
     # TODO: Implement delete
     await update.message.reply_text("🗑 Удаление последней записи...")
 
+@require_auth
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle photos with QR codes."""
     # TODO: Implement QR code handling
     await update.message.reply_text("📷 Обрабатываю фото с QR-кодом...")
 
+@require_auth
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle text messages."""
     # TODO: Implement text message handling
