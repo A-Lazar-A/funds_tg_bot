@@ -17,6 +17,69 @@
 - Текстовый ввод транзакций (функция `handle_text`)
 - Удаление последней транзакции (команда `/delete`)
 
+## Запуск через Docker
+
+### Быстрый запуск
+
+1. Убедитесь, что у вас установлен Docker
+
+2. Создайте файл `.env` с необходимыми переменными окружения (см. раздел "Установка")
+
+3. Соберите и запустите контейнер:
+```bash
+# Собрать образ
+docker build -t funds-bot .
+
+# Запустить контейнер
+docker run --env-file .env funds-bot
+```
+
+### Запуск в фоновом режиме
+
+```bash
+# Запустить контейнер в фоновом режиме
+docker run -d --name funds-bot --env-file .env funds-bot
+
+# Посмотреть логи
+docker logs funds-bot
+
+# Остановить контейнер
+docker stop funds-bot
+
+# Удалить контейнер
+docker rm funds-bot
+```
+
+### Использование docker-compose (рекомендуется)
+
+1. Создайте файл `docker-compose.yml`:
+```yaml
+version: '3.8'
+
+services:
+  funds-bot:
+    build: .
+    container_name: funds-bot
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+```
+
+2. Запустите бота:
+```bash
+# Запуск
+docker-compose up -d
+
+# Просмотр логов
+docker-compose logs -f
+
+# Остановка
+docker-compose down
+```
+
+
 ## Установка
 
 1. Клонируйте репозиторий:
