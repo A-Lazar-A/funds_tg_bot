@@ -2,6 +2,7 @@ from PIL import Image
 from pyzbar.pyzbar import decode
 import io
 
+
 class QRService:
     def __init__(self):
         pass
@@ -11,16 +12,16 @@ class QRService:
         try:
             # Convert bytes to image
             image = Image.open(io.BytesIO(image_data))
-            
+
             # Decode QR codes
             decoded_objects = decode(image)
-            
+
             if not decoded_objects:
                 return None
-            
+
             # Return the first QR code data
-            return decoded_objects[0].data.decode('utf-8')
-            
+            return decoded_objects[0].data.decode("utf-8")
+
         except Exception as e:
             print(f"Error decoding QR code: {e}")
             return None
