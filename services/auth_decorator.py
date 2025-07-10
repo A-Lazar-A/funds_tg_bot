@@ -37,6 +37,9 @@ def is_user_allowed(user_id: int) -> bool:
         with open(users_file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             allowed_users = data.get("allowed_users", [])
-            return user_id in allowed_users
+            for user in allowed_users:
+                if isinstance(user, dict) and user.get("user_id") == user_id:
+                    return True
+            return False
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         return False

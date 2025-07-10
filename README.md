@@ -21,51 +21,7 @@
 
 ### Быстрый запуск
 
-1. Убедитесь, что у вас установлен Docker
-
-2. Создайте файл `.env` с необходимыми переменными окружения (см. раздел "Установка")
-
-3. Соберите и запустите контейнер:
-```bash
-# Собрать образ
-docker build -t funds-bot .
-
-# Запустить контейнер
-docker run --env-file .env funds-bot
-```
-
-### Запуск в фоновом режиме
-
-```bash
-# Запустить контейнер в фоновом режиме
-docker run -d --name funds-bot --env-file .env funds-bot
-
-# Посмотреть логи
-docker logs funds-bot
-
-# Остановить контейнер
-docker stop funds-bot
-
-# Удалить контейнер
-docker rm funds-bot
-```
-
-### Использование docker-compose (рекомендуется)
-
-1. Создайте файл `docker-compose.yml`:
-```yaml
-version: '3.8'
-
-services:
-  funds-bot:
-    build: .
-    container_name: funds-bot
-    env_file:
-      - .env
-    restart: unless-stopped
-    volumes:
-      - ./config:/app/config
-```
+1. Создайте файл `.env` с необходимыми переменными окружения (см. раздел "Установка")
 
 2. Запустите бота:
 ```bash
@@ -108,7 +64,9 @@ TELEGRAM_BOT_TOKEN=
 
 # Google Sheets
 GOOGLE_SHEETS_CREDENTIALS_FILE="config/google-sheets-credentials.json"
-SPREADSHEET_ID=
+SPREADSHEET_ID_MY=...   # Личная таблица пользователя 1
+SPREADSHEET_ID_HER=...  # Личная таблица пользователя 2
+SPREADSHEET_ID_COMMON=... # Общая таблица
 
 # Распознование речи от Сбера (https://developers.sber.ru/portal/products/smartspeech)
 SALUTE_SPEECH_AUTH_KEY=
@@ -139,6 +97,30 @@ python bot.py
 - `/stats` - Показать статистику за текущий месяц
 - `/categories` - Показать список доступных категорий
 - `/delete` - Удалить последнюю транзакцию (в разработке)
+- `/select_table` - Выбрать, в какую таблицу записывать транзакции
+
+### Разграничение таблиц по пользователям
+
+Теперь каждый пользователь может выбрать, в какую Google Таблицу будут записываться его транзакции: свою личную или общую. Для этого используйте команду `/select_table`.
+
+- Поддерживается до 3-х отдельных Google Sheets (например, "Моя", "Её", "Общая").
+- Для каждого пользователя бот запоминает выбранную таблицу.
+- По умолчанию используется первая доступная таблица.
+
+#### Пример .env для нескольких таблиц:
+```
+# Telegram Bot Token (получите у @BotFather)
+TELEGRAM_BOT_TOKEN=
+
+# Google Sheets
+GOOGLE_SHEETS_CREDENTIALS_FILE="config/google-sheets-credentials.json"
+SPREADSHEET_ID_MY=...   # Личная таблица пользователя 1
+SPREADSHEET_ID_HER=...  # Личная таблица пользователя 2
+SPREADSHEET_ID_COMMON=... # Общая таблица
+
+# Распознование речи от Сбера
+SALUTE_SPEECH_AUTH_KEY=
+```
 
 ## Структура проекта
 

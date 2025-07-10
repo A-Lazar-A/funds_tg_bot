@@ -3,11 +3,11 @@ from typing import Dict
 import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from config import GOOGLE_SHEETS_CREDENTIALS_FILE, SPREADSHEET_ID, SHEET_HEADERS
+from config import GOOGLE_SHEETS_CREDENTIALS_FILE, SHEET_HEADERS
 
 
 class GoogleSheetsService:
-    def __init__(self):
+    def __init__(self, spreadsheet_id):
         # Get absolute path to credentials file
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         credentials_path = os.path.join(base_dir, GOOGLE_SHEETS_CREDENTIALS_FILE)
@@ -16,7 +16,22 @@ class GoogleSheetsService:
             credentials_path, scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
         self.service = build("sheets", "v4", credentials=self.credentials)
-        self.spreadsheet_id = SPREADSHEET_ID
+        self.spreadsheet_id = spreadsheet_id
+
+    def get_available_sheets(self, spreadsheet_ids):
+        """
+        Возвращает список кортежей (имя_таблицы, spreadsheet_id) для всех таблиц из списка spreadsheet_ids.
+        Имя берется из title документа Google Sheets.
+        """
+        sheets = []
+        for spreadsheet_id in spreadsheet_ids:
+            try:
+                spreadsheet = self.service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+                title = spreadsheet["properties"]["title"]
+                sheets.append((title, spreadsheet_id))
+            except Exception as e:
+                print(f"Не удалось получить имя таблицы для {spreadsheet_id}: {e}")
+        return sheets
 
     def get_current_sheet_name(self) -> str:
         """Get current month sheet name in format 'Month YYYY'."""

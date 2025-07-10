@@ -1,6 +1,12 @@
 {
   "allowed_users": [
-    123456789
-  ],
-  "description": "Список Telegram ID пользователей, которым разрешен доступ к боту"
+    {
+      "user_id": 1234,
+      "selected_sheet": ""
+    },
+    {
+      "user_id": 1111,
+      "selected_sheet": ""
+    }
+  ]
 }

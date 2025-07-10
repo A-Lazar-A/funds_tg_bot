@@ -11,7 +11,12 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler,
 )
-from config import TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE
+from config import (
+    TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE,
+    SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON
+)
+import json
+
 from services.speech_service import SpeechService
 from services.sheets_service import GoogleSheetsService
 from services.category_service import CategoryService
@@ -31,7 +36,61 @@ logger = logging.getLogger(__name__)
 print(GOOGLE_SHEETS_CREDENTIALS_FILE)
 # Initialize services
 speech_service = SpeechService()
-sheets_service = GoogleSheetsService()
+# Удаляем: sheets_service = GoogleSheetsService()
+import json
+from config import (
+    TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE,
+    SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON
+)
+
+SPREADSHEET_IDS = [SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON]
+
+def get_sheet_choices():
+    """Возвращает dict: {имя_таблицы: spreadsheet_id}"""
+    # Можно использовать любой spreadsheet_id для инициализации сервиса
+    service = GoogleSheetsService(SPREADSHEET_IDS[0])
+    return dict(service.get_available_sheets(SPREADSHEET_IDS))
+
+ALLOWED_USERS_PATH = 'data/allowed_users.json'
+
+# Удаляю USER_SHEETS_PATH и все обращения к нему
+
+def load_allowed_users():
+    try:
+        with open(ALLOWED_USERS_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('allowed_users', [])
+    except Exception:
+        return []
+
+def save_allowed_users(users):
+    with open(ALLOWED_USERS_PATH, 'w', encoding='utf-8') as f:
+        json.dump({"allowed_users": users}, f, ensure_ascii=False, indent=2)
+
+def get_user_entry(user_id):
+    users = load_allowed_users()
+    for user in users:
+        if user["user_id"] == user_id:
+            return user
+    return None
+
+def get_spreadsheet_id_for_user(user_id):
+    users = load_allowed_users()
+    sheet_choices = get_sheet_choices()
+    user = None
+    for u in users:
+        if u["user_id"] == user_id:
+            user = u
+            break
+    if user is None:
+        # Неавторизованный пользователь
+        raise Exception("User not allowed")
+    # Если не выбран лист — присваиваем первую таблицу
+    if not user.get("selected_sheet") or user["selected_sheet"] not in sheet_choices:
+        user["selected_sheet"] = next(iter(sheet_choices.keys()))
+        save_allowed_users(users)
+    return sheet_choices[user["selected_sheet"]]
+
 category_service = CategoryService()
 
 
@@ -48,7 +107,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/stats - Показать статистику за месяц\n"
         "/categories - Показать список категорий\n"
         "/delete - Удалить последнюю запись\n"
-        "/help - Показать это сообщение"
+        "/select_table - Выбрать, в какую таблицу записывать транзакции\n"
+        "/help - Показать это сообщение\n\n"
+        "🆕 Теперь вы можете выбрать, в какую Google Таблицу будут записываться ваши транзакции: свою личную или общую. Используйте /select_table!"
     )
     await update.message.reply_text(welcome_message)
 
@@ -241,6 +302,7 @@ async def handle_confirmation(
     if query.data == "confirm_yes":
         try:
             # Save transaction to Google Sheets
+            sheets_service = GoogleSheetsService(get_spreadsheet_id_for_user(user_id))
             sheets_service.add_transaction(
                 transaction_type=transaction["type"],
                 category=transaction["category"],
@@ -275,6 +337,8 @@ async def handle_confirmation(
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send statistics when the command /stats is issued."""
     try:
+        user_id = update.effective_user.id
+        sheets_service = GoogleSheetsService(get_spreadsheet_id_for_user(user_id))
         stats = sheets_service.get_monthly_statistics()
 
         message = (
@@ -326,10 +390,66 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text("📝 Обрабатываю текстовое сообщение...")
 
 
+@require_auth
+async def select_table_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    sheet_choices = get_sheet_choices()
+    user = get_user_entry(user_id)
+    current = user["selected_sheet"] if user else None
+    keyboard = []
+    for name in sheet_choices:
+        text = f"{'✅ ' if name == current else ''}{name}"
+        keyboard.append([
+            InlineKeyboardButton(text, callback_data=f"select_table_{name}")
+        ])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "В какую таблицу будем записывать транзакции?",
+        reply_markup=reply_markup
+    )
+
+async def select_table_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user_id = query.from_user.id
+    sheet_choices = get_sheet_choices()
+    users = load_allowed_users()
+    user = None
+    for u in users:
+        if u["user_id"] == user_id:
+            user = u
+            break
+    if not user:
+        await query.answer("Нет доступа", show_alert=True)
+        return
+    # Получаем выбранное имя таблицы
+    sheet_name = query.data.replace("select_table_", "")
+    if sheet_name not in sheet_choices:
+        await query.answer("Ошибка выбора", show_alert=True)
+        return
+    user["selected_sheet"] = sheet_name
+    save_allowed_users(users)
+    await query.answer()
+    await query.edit_message_text(
+        f"Готово. Все новые транзакции будут записываться в таблицу: {sheet_name}",
+    )
+
+
 def main() -> None:
     """Start the bot."""
-    # Создать лист Summary, если его нет
-    sheets_service.ensure_summary_sheet()
+    # Инициализация selected_sheet для всех пользователей
+    users = load_allowed_users()
+    sheet_choices = get_sheet_choices()
+    changed = False
+    for user in users:
+        if not user.get("selected_sheet") or user["selected_sheet"] not in sheet_choices:
+            user["selected_sheet"] = next(iter(sheet_choices.keys()))
+            changed = True
+    if changed:
+        save_allowed_users(users)
+    # Создать лист Summary, если его нет для всех таблиц
+    for spreadsheet_id in sheet_choices.values():
+        sheets_service = GoogleSheetsService(spreadsheet_id)
+        sheets_service.ensure_summary_sheet()
     # Create the Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -358,6 +478,8 @@ def main() -> None:
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
     )
+    application.add_handler(CommandHandler("select_table", select_table_command))
+    application.add_handler(CallbackQueryHandler(select_table_callback, pattern="^select_table_"))
 
     # Start the Bot
     application.run_polling(allowed_updates=Update.ALL_TYPES)
