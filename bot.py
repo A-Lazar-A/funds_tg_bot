@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
     WAITING_CATEGORY,
     WAITING_CONFIRMATION,
 ) = range(2)
-print(GOOGLE_SHEETS_CREDENTIALS_FILE)
 category_service = CategoryService()
 # Initialize services
 speech_service = SpeechService(category_service)
@@ -134,7 +133,7 @@ async def process_transaction_text(
     text: str,
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
-) -> typing.Awaitable[int]:
+) -> int:
     transaction = speech_service.parse_transcription(text)
     logger.info(f"Transaction: {transaction}")
 
@@ -446,8 +445,11 @@ def main() -> None:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Create conversation handler for voice messages
-    voice_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.VOICE, handle_voice)],
+    voice_and_txt_handler = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.VOICE, handle_voice),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+        ],
         states={
             WAITING_CATEGORY: [
                 CallbackQueryHandler(handle_category_selection, pattern="^category_")
@@ -465,11 +467,8 @@ def main() -> None:
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("categories", categories_command))
     application.add_handler(CommandHandler("delete", delete_command))
-    application.add_handler(voice_handler)
+    application.add_handler(voice_and_txt_handler)
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
-    )
     application.add_handler(CommandHandler("select_table", select_table_command))
     application.add_handler(CallbackQueryHandler(select_table_callback, pattern="^select_table_"))
 
