@@ -121,7 +121,7 @@ class SpeechService:
 
             # Extract amount (looking for numbers)
 
-            amount_match = re.search(r"\d*(?: \d{3})+(?:[.,]\d{2})?", text)
+            amount_match = re.search(r"\d+(?: \d{3})*(?:[.,]\d{2})?", text)
             if amount_match:
                 result["amount"] = float(
                     amount_match.group().replace(",", ".").replace(" ", "")
