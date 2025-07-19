@@ -89,7 +89,6 @@ class CategoryService:
             for transaction_type in ["income", "expense"]:
                 for category in categories[transaction_type]["categories"]:
                     categories["keywords"][category.lower()] = transaction_type
-            print(categories)
             return categories
 
         except Exception as e:
@@ -143,7 +142,7 @@ class CategoryService:
         """Get list of keywords for transaction type (income/expense)."""
         return self.categories.get("keywords", {}).get(transaction_type, {})
 
-    def detect_transaction_type(self, text: str) -> Optional[str]:
+    def detect_transaction_type(self, text: str) -> str:
         """Detect transaction type from text using keywords."""
         text = text.lower()
         words = text.split()
@@ -153,7 +152,6 @@ class CategoryService:
             clean_word = re.sub(r"[^\wа-яА-ЯёЁ]", "", word)
             if transaction_type := self.categories["keywords"].get(clean_word):
                 return transaction_type
-        print(words)
         return "expense"
 
     def add_category(self, transaction_type: str, category: str) -> bool:

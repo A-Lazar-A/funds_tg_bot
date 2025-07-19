@@ -16,6 +16,7 @@ from config import (
     SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON
 )
 import json
+import typing
 
 from services.speech_service import SpeechService
 from services.sheets_service import GoogleSheetsService
@@ -129,6 +130,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(help_message)
 
 
+async def process_transaction_text(
+    text: str,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+) -> typing.Awaitable[int]:
+    transaction = speech_service.parse_transcription(text)
+    logger.info(f"Transaction: {transaction}")
+
+    if not transaction["amount"]:
+        await update.message.reply_text("❌ Не удалось определить сумму.")
+        return ConversationHandler.END
+
+    context.user_data["transaction"] = transaction
+
+    if not transaction["category"]:
+        keyboard = []
+        categories = (
+            category_service.get_categories("income")
+            if transaction["type"] == "Доход"
+            else category_service.get_categories("expense")
+        )
+        for category in categories:
+            keyboard.append([
+                InlineKeyboardButton(category, callback_data=f"category_{category}")
+            ])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"Вы сказали: {text}\n\n"
+            f"Тип: {transaction['type']}\n"
+            f"Сумма: {transaction['amount']} руб.\n\n"
+            "Выберите категорию:",
+            reply_markup=reply_markup,
+        )
+        return WAITING_CATEGORY
+
+    return await confirm_transaction(update, context)
+
+
 @require_auth
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle voice messages."""
@@ -155,51 +194,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             )
             return ConversationHandler.END
         logger.info(f"Transcribed text: {transcribed_text}")
-        # Parse transcription
-        transaction = speech_service.parse_transcription(transcribed_text)
-        logger.info(f"Transaction: {transaction}")
-
-        if not transaction["type"] or not transaction["amount"]:
-            await update.message.reply_text(
-                "❌ Не удалось определить тип операции или сумму. "
-                "Пожалуйста, говорите четко, например: 'Расход на продукты 500 рублей'"
-            )
-            return ConversationHandler.END
-
-        # Store transaction data in context
-        context.user_data["transaction"] = transaction
-
-        # If category is not specified, ask for it
-        if not transaction["category"]:
-            keyboard = []
-            categories = (
-                category_service.get_categories("income")
-                if transaction["type"] == "Доход"
-                else category_service.get_categories("expense")
-            )
-
-            # Create keyboard with categories
-            for category in categories:
-                keyboard.append(
-                    [
-                        InlineKeyboardButton(
-                            category, callback_data=f"category_{category}"
-                        )
-                    ]
-                )
-
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await update.message.reply_text(
-                f"Вы сказали: {transcribed_text}\n\n"
-                f"Тип: {transaction['type']}\n"
-                f"Сумма: {transaction['amount']} руб.\n\n"
-                "Выберите категорию:",
-                reply_markup=reply_markup,
-            )
-            return WAITING_CATEGORY
-        # If category is specified, ask for confirmation
-        return await confirm_transaction(update, context)
+        # Используем общий обработчик
+        return await process_transaction_text(transcribed_text, update, context)
 
     except Exception as e:
         logger.exception(e)
@@ -384,8 +380,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 @require_auth
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle text messages."""
-    # TODO: Implement text message handling
-    await update.message.reply_text("📝 Обрабатываю текстовое сообщение...")
+    text_msg = update.message.text
+    return await process_transaction_text(text_msg, update, context)
+
 
 
 @require_auth
