@@ -34,9 +34,12 @@ logger = logging.getLogger(__name__)
     WAITING_CONFIRMATION,
 ) = range(2)
 print(GOOGLE_SHEETS_CREDENTIALS_FILE)
+category_service = CategoryService()
 # Initialize services
-speech_service = SpeechService()
-# Удаляем: sheets_service = GoogleSheetsService()
+speech_service = SpeechService(category_service)
+# Создаём один экземпляр сервиса
+sheets_service = GoogleSheetsService()
+
 import json
 from config import (
     TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE,
@@ -47,9 +50,7 @@ SPREADSHEET_IDS = [SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON]
 
 def get_sheet_choices():
     """Возвращает dict: {имя_таблицы: spreadsheet_id}"""
-    # Можно использовать любой spreadsheet_id для инициализации сервиса
-    service = GoogleSheetsService(SPREADSHEET_IDS[0])
-    return dict(service.get_available_sheets(SPREADSHEET_IDS))
+    return dict(sheets_service.get_available_sheets(SPREADSHEET_IDS))
 
 ALLOWED_USERS_PATH = 'data/allowed_users.json'
 
@@ -77,11 +78,7 @@ def get_user_entry(user_id):
 def get_spreadsheet_id_for_user(user_id):
     users = load_allowed_users()
     sheet_choices = get_sheet_choices()
-    user = None
-    for u in users:
-        if u["user_id"] == user_id:
-            user = u
-            break
+    user = get_user_entry(user_id)
     if user is None:
         # Неавторизованный пользователь
         raise Exception("User not allowed")
@@ -91,7 +88,7 @@ def get_spreadsheet_id_for_user(user_id):
         save_allowed_users(users)
     return sheet_choices[user["selected_sheet"]]
 
-category_service = CategoryService()
+
 
 
 @require_auth
@@ -302,8 +299,9 @@ async def handle_confirmation(
     if query.data == "confirm_yes":
         try:
             # Save transaction to Google Sheets
-            sheets_service = GoogleSheetsService(get_spreadsheet_id_for_user(user_id))
+            spreadsheet_id = get_spreadsheet_id_for_user(user_id)
             sheets_service.add_transaction(
+                spreadsheet_id=spreadsheet_id,
                 transaction_type=transaction["type"],
                 category=transaction["category"],
                 amount=transaction["amount"],
@@ -338,8 +336,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Send statistics when the command /stats is issued."""
     try:
         user_id = update.effective_user.id
-        sheets_service = GoogleSheetsService(get_spreadsheet_id_for_user(user_id))
-        stats = sheets_service.get_monthly_statistics()
+        spreadsheet_id = get_spreadsheet_id_for_user(user_id)
+        stats = sheets_service.get_monthly_statistics(spreadsheet_id)
 
         message = (
             f"📊 Статистика за текущий месяц:\n\n"
@@ -439,17 +437,14 @@ def main() -> None:
     # Инициализация selected_sheet для всех пользователей
     users = load_allowed_users()
     sheet_choices = get_sheet_choices()
-    changed = False
-    for user in users:
-        if not user.get("selected_sheet") or user["selected_sheet"] not in sheet_choices:
-            user["selected_sheet"] = next(iter(sheet_choices.keys()))
-            changed = True
-    if changed:
-        save_allowed_users(users)
+    
+    for user in users: 
+        user["selected_sheet"] = next(iter(sheet_choices.keys()))
+            
+    save_allowed_users(users)
     # Создать лист Summary, если его нет для всех таблиц
     for spreadsheet_id in sheet_choices.values():
-        sheets_service = GoogleSheetsService(spreadsheet_id)
-        sheets_service.ensure_summary_sheet()
+        sheets_service.ensure_summary_sheet(spreadsheet_id)
     # Create the Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 

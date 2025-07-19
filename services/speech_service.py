@@ -3,6 +3,7 @@ import aiohttp
 import time
 import ssl
 import uuid
+import re
 from config import (
     SALUTE_SPEECH_API_AUTH_URL,
     SALUTE_SPEECH_AUTH_KEY,
@@ -18,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 class SpeechService:
-    def __init__(self):
+    def __init__(self, category_service: CategoryService):
 
         self.auth_key = SALUTE_SPEECH_AUTH_KEY
         self.api_url = SALUTE_SPEECH_API_URL
         self.api_auth_url = SALUTE_SPEECH_API_AUTH_URL
         self._access_token = None
         self._token_expires_at = 0
-        self.category_service = CategoryService()
+        self.category_service = category_service
 
         # Create SSL context that doesn't verify certificates
         self.ssl_context = ssl.create_default_context()
@@ -119,9 +120,8 @@ class SpeechService:
             result["type"] = "Доход" if transaction_type == "income" else "Расход"
 
             # Extract amount (looking for numbers)
-            import re
 
-            amount_match = re.search(r"\d{1,3}(?: \d{3})*(?:[.,]\d{2})?", text)
+            amount_match = re.search(r"\d*(?: \d{3})+(?:[.,]\d{2})?", text)
             if amount_match:
                 result["amount"] = float(
                     amount_match.group().replace(",", ".").replace(" ", "")

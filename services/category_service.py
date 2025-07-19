@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Dict, List, Optional
+import re
 
 
 class CategoryService:
@@ -85,6 +86,10 @@ class CategoryService:
                     self.synonyms_to_category(raw_categories[transaction_type])
                 )
 
+            for transaction_type in ["income", "expense"]:
+                for category in categories[transaction_type]["categories"]:
+                    categories["keywords"][category.lower()] = transaction_type
+            print(categories)
             return categories
 
         except Exception as e:
@@ -145,9 +150,10 @@ class CategoryService:
 
         # Check for transaction type keywords using dictionary lookup
         for word in words:
-            if transaction_type := self.categories["keywords"].get(word):
+            clean_word = re.sub(r"[^\wа-яА-ЯёЁ]", "", word)
+            if transaction_type := self.categories["keywords"].get(clean_word):
                 return transaction_type
-
+        print(words)
         return "expense"
 
     def add_category(self, transaction_type: str, category: str) -> bool:
@@ -185,6 +191,7 @@ class CategoryService:
         words = text.lower().split()
 
         for word in words:
-            if category := keywords.get(word):
+            clean_word = re.sub(r"[^\wа-яА-ЯёЁ]", "", word)
+            if category := keywords.get(clean_word):
                 return category
         return None

@@ -7,7 +7,7 @@ from config import GOOGLE_SHEETS_CREDENTIALS_FILE, SHEET_HEADERS
 
 
 class GoogleSheetsService:
-    def __init__(self, spreadsheet_id):
+    def __init__(self):
         # Get absolute path to credentials file
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         credentials_path = os.path.join(base_dir, GOOGLE_SHEETS_CREDENTIALS_FILE)
@@ -16,7 +16,6 @@ class GoogleSheetsService:
             credentials_path, scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
         self.service = build("sheets", "v4", credentials=self.credentials)
-        self.spreadsheet_id = spreadsheet_id
 
     def get_available_sheets(self, spreadsheet_ids):
         """
@@ -37,23 +36,23 @@ class GoogleSheetsService:
         """Get current month sheet name in format 'Month YYYY'."""
         return datetime.now().strftime("%B %Y")
 
-    def ensure_sheet_exists(self, sheet_name: str) -> None:
+    def ensure_sheet_exists(self, spreadsheet_id: str, sheet_name: str) -> None:
         """Create sheet if it doesn't exist."""
         try:
             # Try to get the sheet
             self.service.spreadsheets().get(
-                spreadsheetId=self.spreadsheet_id, ranges=[sheet_name]
+                spreadsheetId=spreadsheet_id, ranges=[sheet_name]
             ).execute()
         except Exception:
             # Create new sheet
             body = {"requests": [{"addSheet": {"properties": {"title": sheet_name}}}]}
             self.service.spreadsheets().batchUpdate(
-                spreadsheetId=self.spreadsheet_id, body=body
+                spreadsheetId=spreadsheet_id, body=body
             ).execute()
 
             # Add headers
             self.service.spreadsheets().values().update(
-                spreadsheetId=self.spreadsheet_id,
+                spreadsheetId=spreadsheet_id,
                 range=f"{sheet_name}!A1:F1",
                 valueInputOption="RAW",
                 body={"values": [SHEET_HEADERS]},
@@ -61,6 +60,7 @@ class GoogleSheetsService:
 
     def add_transaction(
         self,
+        spreadsheet_id: str,
         transaction_type: str,
         category: str,
         amount: float,
@@ -69,7 +69,7 @@ class GoogleSheetsService:
     ) -> None:
         """Add a new transaction to the current month's sheet."""
         sheet_name = self.get_current_sheet_name()
-        self.ensure_sheet_exists(sheet_name)
+        self.ensure_sheet_exists(spreadsheet_id, sheet_name)
 
         values = [
             [
@@ -85,20 +85,20 @@ class GoogleSheetsService:
         body = {"values": values}
 
         self.service.spreadsheets().values().append(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!A:F",
             valueInputOption="RAW",
             body=body,
         ).execute()
 
-    def get_monthly_statistics(self) -> Dict:
+    def get_monthly_statistics(self, spreadsheet_id: str) -> Dict:
         """Get statistics for the current month."""
         sheet_name = self.get_current_sheet_name()
         try:
             result = (
                 self.service.spreadsheets()
                 .values()
-                .get(spreadsheetId=self.spreadsheet_id, range=f"{sheet_name}!A2:E")
+                .get(spreadsheetId=spreadsheet_id, range=f"{sheet_name}!A2:E")
                 .execute()
             )
 
@@ -161,12 +161,12 @@ class GoogleSheetsService:
                 "avg_daily_expense": 0,
             }
 
-    def create_summary_charts(self):
+    def create_summary_charts(self, spreadsheet_id: str):
         """Создаёт диаграммы на листе Summary: круговая по категориям, столбчатая по дням (доход/расход), круговая по источникам."""
         sheet_name = "Summary"
         # Получить id листа
         spreadsheet = (
-            self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
+            self.service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         )
         sheet_id = None
         for s in spreadsheet["sheets"]:
@@ -219,7 +219,7 @@ class GoogleSheetsService:
                             "overlayPosition": {
                                 "anchorCell": {
                                     "sheetId": sheet_id,
-                                    "rowIndex": 1,
+                                    "rowIndex": 20,
                                     "columnIndex": 8,
                                 }
                             }
@@ -271,7 +271,7 @@ class GoogleSheetsService:
                             "overlayPosition": {
                                 "anchorCell": {
                                     "sheetId": sheet_id,
-                                    "rowIndex": 1,
+                                    "rowIndex": 20,
                                     "columnIndex": 8,
                                 }
                             }
@@ -360,16 +360,16 @@ class GoogleSheetsService:
             }
         )
         self.service.spreadsheets().batchUpdate(
-            spreadsheetId=self.spreadsheet_id, body={"requests": requests}
+            spreadsheetId=spreadsheet_id, body={"requests": requests}
         ).execute()
 
-    def ensure_summary_sheet(self):
+    def ensure_summary_sheet(self, spreadsheet_id: str):
         """Создаёт лист 'Summary' с формулами для метрик и таблиц, если его ещё нет."""
         sheet_name = "Summary"
         # Проверка наличия листа
         try:
             self.service.spreadsheets().get(
-                spreadsheetId=self.spreadsheet_id, ranges=[sheet_name]
+                spreadsheetId=spreadsheet_id, ranges=[sheet_name]
             ).execute()
             return  # Лист уже есть
         except Exception:
@@ -377,7 +377,7 @@ class GoogleSheetsService:
 
         # Получить список всех листов (месяцев)
         spreadsheet = (
-            self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
+            self.service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         )
         month_sheets = [
             s["properties"]["title"]
@@ -389,7 +389,7 @@ class GoogleSheetsService:
         add_sheet_response = (
             self.service.spreadsheets()
             .batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
+                spreadsheetId=spreadsheet_id,
                 body={
                     "requests": [{"addSheet": {"properties": {"title": sheet_name}}}]
                 },
@@ -400,7 +400,7 @@ class GoogleSheetsService:
 
         # 2. Вставить текст "Выберите месяц:" в D1 и выпадающий список в E1
         self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!D1",
             valueInputOption="USER_ENTERED",
             body={"values": [["Выберите месяц:"]]},
@@ -431,7 +431,7 @@ class GoogleSheetsService:
             }
         ]
         self.service.spreadsheets().batchUpdate(
-            spreadsheetId=self.spreadsheet_id, body={"requests": requests}
+            spreadsheetId=spreadsheet_id, body={"requests": requests}
         ).execute()
 
         # Формулы с INDIRECT для выбранного месяца (E1)
@@ -455,31 +455,31 @@ class GoogleSheetsService:
         daily_income_formula = '=QUERY(ARRAYFORMULA({INT(INDIRECT($E$1&"!A:A"))\ INDIRECT($E$1&"!B:B")\ INDIRECT($E$1&"!D:D")});"select Col1, sum(Col3) where Col2 = \'Доход\' group by Col1 order by Col1 label sum(Col3) \'Сумма\', Col1 \'Дата\'")'
 
         self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!A1:B7",
             valueInputOption="USER_ENTERED",
             body={"values": summary_values},
         ).execute()
         self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!D3",
             valueInputOption="USER_ENTERED",
             body={"values": [[expense_by_cat_formula]]},
         ).execute()
         self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!F3",
             valueInputOption="USER_ENTERED",
             body={"values": [[income_by_cat_formula]]},
         ).execute()
         self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!H3",
             valueInputOption="USER_ENTERED",
             body={"values": [[daily_expense_formula]]},
         ).execute()
         self.service.spreadsheets().values().update(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             range=f"{sheet_name}!J3",
             valueInputOption="USER_ENTERED",
             body={"values": [[daily_income_formula]]},
@@ -513,9 +513,9 @@ class GoogleSheetsService:
             }
         }
         self.service.spreadsheets().batchUpdate(
-            spreadsheetId=self.spreadsheet_id,
+            spreadsheetId=spreadsheet_id,
             body={"requests": [date_format_request, date_format_request_j]},
         ).execute()
 
         # После вставки формул — создать диаграммы
-        self.create_summary_charts()
+        self.create_summary_charts(spreadsheet_id)
