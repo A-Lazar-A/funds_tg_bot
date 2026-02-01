@@ -195,3 +195,4 @@ cython_debug/
 .cursorindexingignore
 
 config/
+data/allowed_users.json

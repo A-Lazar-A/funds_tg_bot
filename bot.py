@@ -142,6 +142,7 @@ async def process_transaction_text(
         return ConversationHandler.END
 
     context.user_data["transaction"] = transaction
+    context.user_data["type"] = "text"
 
     if not transaction["category"]:
         keyboard = []
@@ -193,6 +194,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             )
             return ConversationHandler.END
         logger.info(f"Transcribed text: {transcribed_text}")
+        context.user_data["type"] = "voice"
         # Используем общий обработчик
         return await process_transaction_text(transcribed_text, update, context)
 
@@ -300,7 +302,7 @@ async def handle_confirmation(
                 transaction_type=transaction["type"],
                 category=transaction["category"],
                 amount=transaction["amount"],
-                source="Голос",
+                source=context.user_data["type"],
                 comment=transaction["comment"],
             )
 
