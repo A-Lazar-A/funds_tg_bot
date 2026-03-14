@@ -1,7 +1,10 @@
 import logging
 import os
 import tempfile
+import json
+import typing
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -11,17 +14,17 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler,
 )
+from telegram.request import HTTPXRequest
 from config import (
     TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE,
     SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON
 )
-import json
-import typing
 
 from services.speech_service import SpeechService
 from services.sheets_service import GoogleSheetsService
 from services.category_service import CategoryService
 from services.auth_decorator import require_auth, is_user_allowed
+from services.telegram_utils import safe_edit_text, safe_reply_text
 
 # Enable logging
 logging.basicConfig(
@@ -39,12 +42,6 @@ category_service = CategoryService()
 speech_service = SpeechService(category_service)
 # Создаём один экземпляр сервиса
 sheets_service = GoogleSheetsService()
-
-import json
-from config import (
-    TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE,
-    SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON
-)
 
 SPREADSHEET_IDS = [SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON]
 
@@ -89,6 +86,41 @@ def get_spreadsheet_id_for_user(user_id):
     return sheet_choices[user["selected_sheet"]]
 
 
+async def send_user_message(
+    update: Update,
+    text: str,
+    **kwargs: typing.Any,
+):
+    """Reply in chat with retry logic for transient Telegram API failures."""
+    if not update.message:
+        logger.warning("Cannot reply to update without message: %s", update)
+        return None
+    return await safe_reply_text(update.message, text, **kwargs)
+
+
+async def send_or_edit_message(
+    update: Update,
+    text: str,
+    **kwargs: typing.Any,
+):
+    """Edit callback message or reply to the chat depending on update type."""
+    if update.callback_query:
+        return await safe_edit_text(update.callback_query.message, text, **kwargs)
+    return await send_user_message(update, text, **kwargs)
+
+
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Log unhandled exceptions from telegram handlers."""
+    if isinstance(context.error, (TimedOut, NetworkError)):
+        logger.warning("Transient Telegram API error while handling update", exc_info=context.error)
+        return
+
+    logger.exception("Unhandled exception while processing update %s", update, exc_info=context.error)
+
+
 
 
 @require_auth
@@ -108,7 +140,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/help - Показать это сообщение\n\n"
         "🆕 Теперь вы можете выбрать, в какую Google Таблицу будут записываться ваши транзакции: свою личную или общую. Используйте /select_table!"
     )
-    await update.message.reply_text(welcome_message)
+    await send_user_message(update, welcome_message)
 
 
 @require_auth
@@ -126,7 +158,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "• Отправить фото с QR-кодом\n"
         "• Написать текст в формате: 'Доход/Расход Категория Сумма'"
     )
-    await update.message.reply_text(help_message)
+    await send_user_message(update, help_message)
 
 
 async def process_transaction_text(
@@ -138,7 +170,7 @@ async def process_transaction_text(
     logger.info(f"Transaction: {transaction}")
 
     if not transaction["amount"]:
-        await update.message.reply_text("❌ Не удалось определить сумму.")
+        await send_user_message(update, "❌ Не удалось определить сумму.")
         return ConversationHandler.END
 
     context.user_data["transaction"] = transaction
@@ -156,7 +188,8 @@ async def process_transaction_text(
                 InlineKeyboardButton(category, callback_data=f"category_{category}")
             ])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
+        await send_user_message(
+            update,
             f"Вы сказали: {text}\n\n"
             f"Тип: {transaction['type']}\n"
             f"Сумма: {transaction['amount']} руб.\n\n"
@@ -189,7 +222,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         os.unlink(temp_filename)
 
         if not transcribed_text:
-            await update.message.reply_text(
+            await send_user_message(
+                update,
                 "❌ Не удалось распознать голосовое сообщение. Попробуйте еще раз."
             )
             return ConversationHandler.END
@@ -200,7 +234,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     except Exception as e:
         logger.exception(e)
-        await update.message.reply_text(
+        await send_user_message(
+            update,
             "❌ Произошла ошибка при обработке голосового сообщения."
         )
         return ConversationHandler.END
@@ -260,11 +295,10 @@ async def confirm_transaction(
     )
 
     if update.callback_query:
-        await update.callback_query.message.edit_text(
+        await send_or_edit_message(
+            update,
             message, reply_markup=reply_markup
         )
-    else:
-        await update.message.reply_text(message, reply_markup=reply_markup)
 
     return WAITING_CONFIRMATION
 
@@ -306,20 +340,23 @@ async def handle_confirmation(
                 comment=transaction["comment"],
             )
 
-            await query.message.edit_text(
+            await safe_edit_text(
+                query.message,
                 base_message + "✅ Статус: Транзакция успешно сохранена!",
                 reply_markup=None,
             )
 
         except Exception as e:
             logger.exception(e)
-            await query.message.edit_text(
+            await safe_edit_text(
+                query.message,
                 base_message + "❌ Статус: Произошла ошибка при сохранении транзакции.",
                 reply_markup=None,
             )
 
     else:
-        await query.message.edit_text(
+        await safe_edit_text(
+            query.message,
             base_message + "❌ Статус: Транзакция отменена.", reply_markup=None
         )
 
@@ -347,11 +384,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         for category, amount in stats["top_expenses"]:
             message += f"• {category}: {amount:.2f} руб.\n"
 
-        await update.message.reply_text(message)
+        await send_user_message(update, message)
 
     except Exception as e:
         logger.exception(e)
-        await update.message.reply_text("❌ Произошла ошибка при получении статистики.")
+        await send_user_message(update, "❌ Произошла ошибка при получении статистики.")
 
 
 @require_auth
@@ -361,21 +398,21 @@ async def categories_command(
     """Show categories when the command /categories is issued."""
     # TODO
 
-    await update.message.reply_text("Категории...")
+    await send_user_message(update, "Категории...")
 
 
 @require_auth
 async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Delete last transaction when the command /delete is issued."""
     # TODO: Implement delete
-    await update.message.reply_text("🗑 Удаление последней записи...")
+    await send_user_message(update, "🗑 Удаление последней записи...")
 
 
 @require_auth
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle photos with QR codes."""
     # TODO: Implement QR code handling
-    await update.message.reply_text("📷 Обрабатываю фото с QR-кодом...")
+    await send_user_message(update, "📷 Обрабатываю фото с QR-кодом...")
 
 
 @require_auth
@@ -399,7 +436,8 @@ async def select_table_command(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton(text, callback_data=f"select_table_{name}")
         ])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
+    await send_user_message(
+        update,
         "В какую таблицу будем записывать транзакции?",
         reply_markup=reply_markup
     )
@@ -425,7 +463,8 @@ async def select_table_callback(update: Update, context: ContextTypes.DEFAULT_TY
     user["selected_sheet"] = sheet_name
     save_allowed_users(users)
     await query.answer()
-    await query.edit_message_text(
+    await safe_edit_text(
+        query.message,
         f"Готово. Все новые транзакции будут записываться в таблицу: {sheet_name}",
     )
 
@@ -444,7 +483,13 @@ def main() -> None:
     for spreadsheet_id in sheet_choices.values():
         sheets_service.ensure_summary_sheet(spreadsheet_id)
     # Create the Application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    request = HTTPXRequest(
+        connect_timeout=10.0,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        pool_timeout=10.0,
+    )
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
 
     # Create conversation handler for voice messages
     voice_and_txt_handler = ConversationHandler(
@@ -473,6 +518,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(CommandHandler("select_table", select_table_command))
     application.add_handler(CallbackQueryHandler(select_table_callback, pattern="^select_table_"))
+    application.add_error_handler(error_handler)
 
     # Start the Bot
     application.run_polling(allowed_updates=Update.ALL_TYPES)

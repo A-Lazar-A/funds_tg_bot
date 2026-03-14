@@ -4,6 +4,8 @@ import os
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from services.telegram_utils import safe_reply_text
+
 
 def require_auth(func):
     """Декоратор для проверки авторизации пользователя."""
@@ -16,10 +18,12 @@ def require_auth(func):
 
         # Проверяем доступ пользователя
         if not is_user_allowed(user_id):
-            await update.message.reply_text(
-                "❌ У вас нет доступа к этому боту.\n"
-                "Обратитесь к администратору для получения доступа."
-            )
+            if update.message:
+                await safe_reply_text(
+                    update.message,
+                    "❌ У вас нет доступа к этому боту.\n"
+                    "Обратитесь к администратору для получения доступа."
+                )
             return
 
         return await func(update, context, *args, **kwargs)
