@@ -2,8 +2,9 @@ import logging
 import os
 import tempfile
 import json
+import socket
 import typing
-import time
+import warnings
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.error import NetworkError, TimedOut
 from telegram.ext import (
@@ -16,6 +17,7 @@ from telegram.ext import (
     CallbackQueryHandler,
 )
 from telegram.request import HTTPXRequest
+from telegram.warnings import PTBUserWarning
 from config import (
     TELEGRAM_BOT_TOKEN, GOOGLE_SHEETS_CREDENTIALS_FILE,
     SPREADSHEET_ID_MY, SPREADSHEET_ID_HER, SPREADSHEET_ID_COMMON
@@ -32,7 +34,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-STARTUP_RETRY_DELAY_SECONDS = 15
+TELEGRAM_API_HOSTS = {"api.telegram.org", "api.telegram.org."}
 
 # States for conversation
 (
@@ -86,6 +88,27 @@ def get_spreadsheet_id_for_user(user_id):
         user["selected_sheet"] = next(iter(sheet_choices.keys()))
         save_allowed_users(users)
     return sheet_choices[user["selected_sheet"]]
+
+
+def force_ipv4_for_telegram() -> None:
+    """Prefer IPv4 for Telegram API to avoid broken IPv6 routes in Docker."""
+    original_getaddrinfo = socket.getaddrinfo
+
+    def ipv4_first_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        if host in TELEGRAM_API_HOSTS and family in (0, socket.AF_UNSPEC, socket.AF_INET6):
+            ipv4_results = original_getaddrinfo(
+                host,
+                port,
+                socket.AF_INET,
+                type,
+                proto,
+                flags,
+            )
+            if ipv4_results:
+                return ipv4_results
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = ipv4_first_getaddrinfo
 
 
 async def send_user_message(
@@ -296,11 +319,10 @@ async def confirm_transaction(
         f"Комментарий: {transaction['comment']}"
     )
 
-    if update.callback_query:
-        await send_or_edit_message(
-            update,
-            message, reply_markup=reply_markup
-        )
+    await send_or_edit_message(
+        update,
+        message, reply_markup=reply_markup
+    )
 
     return WAITING_CONFIRMATION
 
@@ -495,7 +517,6 @@ def build_application() -> Application:
             ],
         },
         fallbacks=[],
-        per_message=True,
     )
 
     application.add_handler(CommandHandler("start", start))
@@ -513,6 +534,13 @@ def build_application() -> Application:
 
 def main() -> None:
     """Start the bot."""
+    warnings.filterwarnings(
+        "ignore",
+        message=r"If 'per_message=False'.*",
+        category=PTBUserWarning,
+    )
+    force_ipv4_for_telegram()
+
     users = load_allowed_users()
     sheet_choices = get_sheet_choices()
 
@@ -523,21 +551,11 @@ def main() -> None:
     for spreadsheet_id in sheet_choices.values():
         sheets_service.ensure_summary_sheet(spreadsheet_id)
 
-    while True:
-        application = build_application()
-        try:
-            application.run_polling(
-                allowed_updates=Update.ALL_TYPES,
-                bootstrap_retries=-1,
-            )
-            break
-        except (TimedOut, NetworkError):
-            logger.warning(
-                "Telegram API is unavailable during startup. Retrying in %s seconds.",
-                STARTUP_RETRY_DELAY_SECONDS,
-                exc_info=True,
-            )
-            time.sleep(STARTUP_RETRY_DELAY_SECONDS)
+    application = build_application()
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        bootstrap_retries=-1,
+    )
 
 
 if __name__ == "__main__":
