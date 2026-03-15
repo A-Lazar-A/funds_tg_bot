@@ -3,6 +3,7 @@ import os
 import tempfile
 import json
 import typing
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.error import NetworkError, TimedOut
 from telegram.ext import (
@@ -31,6 +32,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+STARTUP_RETRY_DELAY_SECONDS = 15
 
 # States for conversation
 (
@@ -469,20 +471,8 @@ async def select_table_callback(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
-def main() -> None:
-    """Start the bot."""
-    # Инициализация selected_sheet для всех пользователей
-    users = load_allowed_users()
-    sheet_choices = get_sheet_choices()
-    
-    for user in users: 
-        user["selected_sheet"] = next(iter(sheet_choices.keys()))
-            
-    save_allowed_users(users)
-    # Создать лист Summary, если его нет для всех таблиц
-    for spreadsheet_id in sheet_choices.values():
-        sheets_service.ensure_summary_sheet(spreadsheet_id)
-    # Create the Application
+def build_application() -> Application:
+    """Create and configure the Telegram application."""
     request = HTTPXRequest(
         connect_timeout=10.0,
         read_timeout=30.0,
@@ -491,7 +481,6 @@ def main() -> None:
     )
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
 
-    # Create conversation handler for voice messages
     voice_and_txt_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.VOICE, handle_voice),
@@ -506,9 +495,9 @@ def main() -> None:
             ],
         },
         fallbacks=[],
+        per_message=True,
     )
 
-    # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stats", stats_command))
@@ -519,9 +508,36 @@ def main() -> None:
     application.add_handler(CommandHandler("select_table", select_table_command))
     application.add_handler(CallbackQueryHandler(select_table_callback, pattern="^select_table_"))
     application.add_error_handler(error_handler)
+    return application
 
-    # Start the Bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+def main() -> None:
+    """Start the bot."""
+    users = load_allowed_users()
+    sheet_choices = get_sheet_choices()
+
+    for user in users:
+        user["selected_sheet"] = next(iter(sheet_choices.keys()))
+
+    save_allowed_users(users)
+    for spreadsheet_id in sheet_choices.values():
+        sheets_service.ensure_summary_sheet(spreadsheet_id)
+
+    while True:
+        application = build_application()
+        try:
+            application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                bootstrap_retries=-1,
+            )
+            break
+        except (TimedOut, NetworkError):
+            logger.warning(
+                "Telegram API is unavailable during startup. Retrying in %s seconds.",
+                STARTUP_RETRY_DELAY_SECONDS,
+                exc_info=True,
+            )
+            time.sleep(STARTUP_RETRY_DELAY_SECONDS)
 
 
 if __name__ == "__main__":
